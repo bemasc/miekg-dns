@@ -31,66 +31,82 @@ func endingToString(c *zlexer, errstr string) (string, *ParseError) {
 	return s.String(), nil
 }
 
-// A remainder of the rdata with embedded spaces, split on unquoted whitespace
-// and return the parsed string slice or an error
-func endingToTxtSlice(c *zlexer, errstr string) ([]string, *ParseError) {
-	// Get the remaining data until we see a zNewline
+// Reads one character string (and any preceding blank space).
+// Returns an error if parsing failed (e.g. missing close-quote) or nil
+// if there is no more input.
+func readCharacterString(c *zlexer, errstr string) (*string, *ParseError) {
 	l, _ := c.Next()
 	if l.err {
 		return nil, &ParseError{err: errstr, lex: l}
 	}
 
-	// Build the slice
-	s := make([]string, 0)
-	quote := false
-	empty := false
-	for l.value != zNewline && l.value != zEOF {
+	for l.value == zBlank {
+		l, _ = c.Next()
 		if l.err {
 			return nil, &ParseError{err: errstr, lex: l}
 		}
-		switch l.value {
-		case zString:
-			empty = false
+	}
+
+	if l.value == zEOF || l.value == zNewline {
+		return nil, nil
+	} else if l.value == zString {
+		return &l.token, nil
+	} else if l.value == zQuote {
+		var builder strings.Builder
+		for {
+			l, _ = c.Next()
+			if l.err {
+				return nil, &ParseError{err: errstr, lex: l}
+			}
+			if l.value == zQuote {
+				charString := builder.String()
+				return &charString, nil
+			}
+			if l.value == zString || l.value == zBlank {
+				builder.WriteString(l.token)
+			} else {
+				return nil, &ParseError{err: errstr, lex: l}
+			}
+		}
+	} else {
+		return nil, &ParseError{err: errstr, lex: l}
+	}
+}
+
+// A remainder of the rdata with embedded spaces, split on unquoted whitespace
+// and return the parsed string slice or an error
+func endingToTxtSlice(c *zlexer, errstr string) ([]string, *ParseError) {
+	s := make([]string, 0)
+	for {
+		charString, err := readCharacterString(c, errstr)
+		if err != nil {
+			return nil, err
+		}
+		if charString == nil {
+			// Reached end of input
+			return s, nil
+		}
+		token := *charString
+		if len(token) == 0 {
+			s = append(s, token)
+		} else {
 			// split up tokens that are larger than 255 into 255-chunks
-			sx := []string{}
 			p := 0
 			for {
-				i, ok := escapedStringOffset(l.token[p:], 255)
+				i, ok := escapedStringOffset(token[p:], 255)
 				if !ok {
-					return nil, &ParseError{err: errstr, lex: l}
+					return nil, &ParseError{err: errstr, lex: c.Peek()}
 				}
-				if i != -1 && p+i != len(l.token) {
-					sx = append(sx, l.token[p:p+i])
+				if i != -1 && p+i != len(token) {
+					s = append(s, token[p:p+i])
 				} else {
-					sx = append(sx, l.token[p:])
+					s = append(s, token[p:])
 					break
-
 				}
 				p += i
 			}
-			s = append(s, sx...)
-		case zBlank:
-			if quote {
-				// zBlank can only be seen in between txt parts.
-				return nil, &ParseError{err: errstr, lex: l}
-			}
-		case zQuote:
-			if empty && quote {
-				s = append(s, "")
-			}
-			quote = !quote
-			empty = true
-		default:
-			return nil, &ParseError{err: errstr, lex: l}
 		}
-		l, _ = c.Next()
 	}
-
-	if quote {
-		return nil, &ParseError{err: errstr, lex: l}
-	}
-
-	return s, nil
 }
 
 func (rr *A) parse(c *zlexer, o string) *ParseError {
@@ -1008,15 +1024,19 @@ func (rr *RRSIG) parse(c *zlexer, o string) *ParseError {
 
 func (rr *NXT) parse(c *zlexer, o string) *ParseError { return rr.NSEC.parse(c, o) }
 
-func (rr *NSEC) parse(c *zlexer, o string) *ParseError {
+func (rr *NSEC) parse(c *zlexer, o string) (err *ParseError) {
+	rr.NextDomain, rr.TypeBitMap, err = parseNSEC(c, o)
+	return
+}
+
+func parseNSEC(c *zlexer, o string) (name string, types []uint16, err *ParseError) {
 	l, _ := c.Next()
 	name, nameOk := toAbsoluteName(l.token, o)
 	if l.err || !nameOk {
-		return &ParseError{err: "bad NSEC NextDomain", lex: l}
+		err = &ParseError{err: "bad NSEC NextDomain", lex: l}
+		return
 	}
-	rr.NextDomain = name
 
-	rr.TypeBitMap = make([]uint16, 0)
 	var (
 		k  uint16
 		ok bool
@@ -1030,16 +1050,19 @@ func (rr *NSEC) parse(c *zlexer, o string) *ParseError {
 			tokenUpper := strings.ToUpper(l.token)
 			if k, ok = StringToType[tokenUpper]; !ok {
 				if k, ok = typeToInt(l.token); !ok {
-					return &ParseError{err: "bad NSEC TypeBitMap", lex: l}
+					err = &ParseError{err: "bad NSEC TypeBitMap", lex: l}
+					return
 				}
 			}
-			rr.TypeBitMap = append(rr.TypeBitMap, k)
+			types = append(types, k)
 		default:
-			return &ParseError{err: "bad NSEC TypeBitMap", lex: l}
+			err = &ParseError{err: "bad NSEC TypeBitMap", lex: l}
+			return
 		}
 		l, _ = c.Next()
 	}
-	return nil
+	return
+
 }
 
 func (rr *NSEC3) parse(c *zlexer, o string) *ParseError {

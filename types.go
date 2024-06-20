@@ -115,6 +115,9 @@ const (
 	TypeDLV      uint16 = 32769
 	TypeReserved uint16 = 65535
 
+	// Arbitrary private use value for experimenting with SELECT.
+	TypeSELECT uint16 = 65222
+
 	// valid Question.Qclass
 	ClassINET   = 1
 	ClassCSNET  = 2

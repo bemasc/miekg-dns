@@ -69,6 +69,7 @@ var TypeToRR = map[uint16]func() RR{
 	TypeRP:         func() RR { return new(RP) },
 	TypeRRSIG:      func() RR { return new(RRSIG) },
 	TypeRT:         func() RR { return new(RT) },
+	TypeSELECT:     func() RR { return new(SELECT) },
 	TypeSIG:        func() RR { return new(SIG) },
 	TypeSMIMEA:     func() RR { return new(SMIMEA) },
 	TypeSOA:        func() RR { return new(SOA) },
@@ -157,6 +158,7 @@ var TypeToString = map[uint16]string{
 	TypeRRSIG:      "RRSIG",
 	TypeRT:         "RT",
 	TypeReserved:   "Reserved",
+	TypeSELECT:     "SELECT",
 	TypeSIG:        "SIG",
 	TypeSMIMEA:     "SMIMEA",
 	TypeSOA:        "SOA",
@@ -240,6 +242,7 @@ func (rr *RKEY) Header() *RR_Header       { return &rr.Hdr }
 func (rr *RP) Header() *RR_Header         { return &rr.Hdr }
 func (rr *RRSIG) Header() *RR_Header      { return &rr.Hdr }
 func (rr *RT) Header() *RR_Header         { return &rr.Hdr }
+func (rr *SELECT) Header() *RR_Header     { return &rr.Hdr }
 func (rr *SIG) Header() *RR_Header        { return &rr.Hdr }
 func (rr *SMIMEA) Header() *RR_Header     { return &rr.Hdr }
 func (rr *SOA) Header() *RR_Header        { return &rr.Hdr }
@@ -1171,6 +1174,15 @@ func (rr *RRSIG) copy() RR {
 
 func (rr *RT) copy() RR {
 	return &RT{rr.Hdr, rr.Preference, rr.Host}
+}
+
+func (rr *SELECT) copy() RR {
+	return &SELECT{
+		rr.Hdr,
+		rr.Selector,
+		rr.Base,
+		cloneSlice(rr.TypeBitMap),
+	}
 }
 
 func (rr *SIG) copy() RR {
